@@ -1,0 +1,55 @@
+The requirements for running RFECS are:
+gcc 4.4.6 20120305 (Red Hat 4.4.6-4)
+matlab 2012a 
+
+There are two interactive options available:
+1.Train as well as predict
+run:   ./train_and_predict
+2. Predict only
+run:    ./predict_only
+
+Input requirements:
+
+1. Train and Predict
+Input for this is:
+1.ChIP-seq histone modification bed files and corresponding Inputs
+Example- H1_bed_files
+2. A text file indicating location and name of ChIP-seq bed files
+Example- histone_H1_files.txt 
+The format is:
+Mark	name_of_mark	number_of_replicates
+mark_replicate1
+input_replicate1
+mark_replicate2
+input_replicate2
+....
+....
+3.If the cell-type for prediction is different from cell-type,then chip-seq bed files and names of bed files should be provided separately for this 
+4. training set representing enhancers (active p300 for example)
+example- training_set/H1_p300_training_sites.txt.hg19 
+5.training set for background:
+option A: define your own background
+option B (recommended): provide a list of all known p300 binding sites and active TSS.
+Ex- training_set/H1_p300_all_sites.txt.hg19 and training_set/H1_active_tss.hg19
+if your build is not hg19 or hg18, then also provide :
+- chromosome description file of the format of with coordinates. Format as hg18_chrom.bed and hg19_chrom.bed
+- a list of all TSS in the UCSC/refseq database for that build.format : chr	TSS	strand
+- chromosome you would like to use for background (mid-length such as chr10 for humans) 
+
+2. Predict only
+1. Select the trained model. Examples are available in trained_forests for sets of 3 marks or all 24 marks.
+Paste the trained model mat-file to forest_p300_tssbg.mat in this directory
+2.If build is not hg19 or hg18, provide a chromsome description file of the format hg19_chrom.bed
+
+Examples:
+
+To test the working, run the program using H1 bed files in the directory H1_bed_files using hg19 build, histone_H1_files.txt and other training set examples
+
+you can "train_and_predict" or "predict_only" by copying trained_forests/H1_forest_p300_tssbg_k4me1_k4me2_k4me3.mat to forest_p300_tssbg.mat
+
+The results should be similar to H1_enhancers_k4me.txt 
+
+-----------------------------------
+(train and predict_only scripts were modified so that they are now non-interactive and suits better to triton environment.) Gokcen
+
+

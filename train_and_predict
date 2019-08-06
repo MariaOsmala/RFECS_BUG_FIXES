@@ -1,0 +1,194 @@
+#!/bin/tcsh
+
+# parameters that should be changed for each cell-type
+echo "Name of chromsomal build 1.hg19 2.hg18 or 3.other: "
+set chrom_answer = $<
+if ( $chrom_answer == 1) then
+    set chrom_file = hg19_chrom.bed
+    cp sites2_all.hg19 sites2_all
+    cp chr_file_lens.hg19 chr_file_lens
+endif
+if ( $chrom_answer == 2) then
+    set chrom_file = hg18_chrom.bed
+    cp sites2_all.hg18 sites2_all
+    cp chr_file_lens.hg18 chr_file_lens
+endif
+if ( $chrom_answer == 3) then
+    echo "Enter Chromosome coordinate file:"
+    set chrom_file = $<
+    cat $chrom_file | | perl -ne '@_=split;open($out,">>","sites2_all");$count=0;for($i=50;$i<=$_[1];$i=$i+100){$count=$count+1;print $out join("\t",$_[0],$i)."\n";} print $count."\n";' > chr_file_lens
+endif
+
+echo "Name of histone training bed files:"
+set histone_train_file = $<
+
+echo "Generate RPKM files for the training data from scratch? 1.Yes 2.No"
+set genrpkm = $<
+if ( $genrpkm == 1) then
+    echo "Generating RPKM files for training..."
+    gcc -lm get_counts_bin_avg.c -o get_counts_bin_avg
+    ./get_counts_bin_avg $histone_train_file $chrom_file 100 train_cell
+endif
+
+echo "Name of file with selected p300 binding sites for training:"
+set p300_train_file = $<
+
+echo "Do you want to select your own background sites? 1.Yes 2.No"
+set answer = $<
+
+if ( $answer == 1) then
+    echo "Name of file with background sites:"
+    set bg_file = $<
+
+    set num_mods = 0
+    foreach x(`ls train_cell.*.rpkm`)
+        set mod = `echo $x | cut -f2,2 -d\.`
+        echo $mod
+        gcc -lm get_rpkm_sites.c -o get_rpkm_sites
+        ./get_rpkm_sites 1000 20 $p300_train_file $x $chrom_file p300_train.$mod.2kb
+        ./get_rpkm_sites 1000 20 $bg_file $x $chrom_file bg.$mod.2kb
+        if ( $num_mods == 0) then
+            cat p300_train.$mod.2kb.list > p300_2kb
+            cat bg.$mod.2kb.list > bg_2kb
+        else
+            paste p300_2kb p300_train.$mod.2kb.list > temp
+            mv temp p300_2kb
+            paste bg_2kb bg.$mod.2kb.list > temp
+            mv temp bg_2kb
+        endif
+        @ num_mods = $num_mods + 1
+        echo $num_mods
+    end
+
+    cat p300_2kb bg_2kb > set_p300_tssbg
+    cat p300_2kb | perl -ne 'print "1\n";' > vals
+    cat bg_2kb | perl -ne 'print "0\n"' >> vals
+
+endif
+
+if ( $answer == 2) then
+    echo "Name of file with all p300 binding sites:"
+    set p300_all_file = $<
+    echo "Name of file with active TSS:"
+    set active_tss_file = $<
+
+    set num_p300_lines = `cat $p300_train_file| wc -l`
+    shuf $active_tss_file | head -$num_p300_lines > active_tss.txt
+    set active_tss_file = active_tss.txt
+
+    if ( $chrom_answer == 1) then
+        cp training_set/hg19_chr10_tss_free bg_file_orig.txt
+        set chrom_bg = chr10
+    endif
+    if ( $chrom_answer == 2) then
+        cp training_set/hg18_chr10_tss_free bg_file_orig.txt
+        set chrom_bg = chr10
+    endif
+
+        if ( $chrom_answer == 3) then
+            echo " Select chromosome to get background sites:"
+            set chrom_bg = $<
+            set num_p300_lines = `cat $p300_train_file| wc -l`
+            echo "Name of file with all known UCSC TSS:"
+            set all_tss_file = $<
+            grep $chrom_bg $all_tss_file | perl -ne '@_=split;$start=int($_[1]/100)*100-2450;$end=int($_[1]/100)*100+2450;for($i=$start;$i<=$end;$i=$i+100){print join("\t",$_[0],$i)."\n";}'> tss_25kb
+            grep $chrom_bg $chrom_file | perl -ne '@_=split;for($i=50;$i<=$_[1];$i=$i+100){print $_[0]."\t".$i."\n";}' > bg_file1.txt
+            cat bg_file1.txt tss_25kb tss_25kb |sort -k1,1 -k2,2n | uniq -u > bg_file_orig.txt
+            rm bg_file1.txt tss_25kb
+        endif
+
+    grep $chrom_bg $p300_all_file | perl -ne '@_=split;$start=int($_[1]/100)*100-2450;$end=int($_[2]/100)*100+2450;for($i=$start;$i<=$end;$i=$i+100){print join("\t",$_[0],$i)."\n";}'> p300_all_25kb.txt
+    set num_bg_sites = `cat $p300_train_file | wc -l| perl -ne 'if($_<=2500){$num_sites=8*$_;}else{$num_sites=6*$_;}print $num_sites;'`
+    echo "Number of Background sites selected: $num_bg_sites"
+    cat bg_file_orig.txt p300_all_25kb.txt p300_all_25kb.txt | sort -k1,1 -k2,2n | uniq -u | shuf | head -$num_bg_sites| perl -ne 'chomp;print $_."\t+\n";' > bg_sites.txt
+
+    echo "Generating training set profiles:"
+    cut -f3,3 active_tss.txt > strand
+
+    set num_mods = 0
+    foreach x(`ls train_cell.*.rpkm`)
+        set mod = `echo $x | cut -f2,2 -d\.`
+        echo $mod
+        gcc -lm get_rpkm_sites.c -o get_rpkm_sites
+        ./get_rpkm_sites 1000 20 $p300_train_file $x $chrom_file p300_train.$mod.2kb
+        ./get_rpkm_sites 1000 20 active_tss.txt $x $chrom_file tss.$mod.2kb
+        paste tss.$mod.2kb.list strand| perl -ne '@_=split;if($_[20] eq "-"){for($i=19;$i>0;$i--){print $_[$i]."\t";}print $_[0]."\n";}else{$word=join("\t",@_[0..19]);print $word."\n";}' > tss.$mod.2kb.reverse
+        ./get_rpkm_sites 1000 20 bg_sites.txt $x $chrom_file bg.$mod.2kb
+
+        if ( $num_mods == 0) then
+            cat p300_train.$mod.2kb.list > p300_2kb
+            cat tss.$mod.2kb.reverse > tss_2kb
+            cat bg.$mod.2kb.list > bg_2kb
+        else
+            paste p300_2kb p300_train.$mod.2kb.list > temp
+            mv temp p300_2kb
+            paste tss_2kb tss.$mod.2kb.reverse > temp
+            mv temp tss_2kb
+            paste bg_2kb bg.$mod.2kb.list > temp
+            mv temp bg_2kb
+        endif
+        @ num_mods = $num_mods + 1
+        echo $num_mods
+    end
+
+    echo "Done generating training set profiles!"
+    rm tss*.2kb.list tss*.2kb.reverse p300*.2kb.list bg.*.2kb.list bg.*.2kb.list
+    cat p300_2kb tss_2kb bg_2kb > set_p300_tssbg
+    cat p300_2kb | perl -ne 'print "1\n";' > vals
+    cat tss_2kb bg_2kb | perl -ne 'print "0\n"' >> vals
+endif
+
+echo " training forest now..."
+set ntrees = 65
+sed s/nvar/$num_mods/g train.m| sed s/ntrees/$ntrees/g > train_temp.m
+matlab -nodisplay -nosplash -nodesktop -r train_temp
+
+
+echo "Done training forests!"
+
+echo "Generating test-set..."
+set prefix = train_cell
+
+echo "Same cell-type as training? 1.Yes 2.No"
+set answer = $<
+
+
+if ($answer == 2) then
+    echo "Name of file with histone modification bed files for prediction:"
+    set histone_test_file = $<
+    echo "Generating RPKM files for prediction..."
+    gcc -lm get_counts_bin_avg.c -o get_counts_bin_avg
+    ./get_counts_bin_avg $histone_test_file $chrom_file 100 test_cell
+    set prefix = test_cell
+endif
+rm -rf test_set
+mkdir test_set
+
+gcc -lm get_rpkm_sites.c -o get_rpkm_sites
+
+set num_mods = 0
+rm all_mods_rpkm
+foreach y(`ls $prefix.*.rpkm`)
+    ./get_rpkm_sites 50 1 sites2_all $y $chrom_file temp1
+    if ( $num_mods == 0 ) then
+        cat temp1.list > all_mods_rpkm
+    else
+        paste all_mods_rpkm temp1.list > temp2
+        mv temp2 all_mods_rpkm
+    endif
+    @ num_mods = $num_mods + 1
+    echo $y
+end
+
+perl partition_chr.pl $chrom_file all_mods_rpkm test_set
+
+echo "Done generating test-set.Ready to make predictions now"
+
+
+echo " predicting enhancers now..."
+set ntrees = 65
+sed s/nvar/$num_mods/g predict.m| sed s/ntrees/$ntrees/g > predict_temp.m
+matlab -nodisplay -nosplash -nodesktop -r predict_temp
+
+
+

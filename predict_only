@@ -1,0 +1,87 @@
+#!/bin/tcsh -e
+# parameters that should be changed for each cell-type
+
+if ($# != 5) then
+    echo "Usage $0 histone_text_file generate_RPKM(Yes or No) random_forest_mat_file enhancers_output_filename allbins_output_filename"
+    exit 1
+endif
+
+echo "Name of chromsomal build 1.hg19 2.hg18 or 3.other: "
+echo 1
+set chrom_answer = 1
+if ( $chrom_answer == 1) then
+    set chrom_file = hg19_chrom.bed
+    cp sites2_all.hg19 sites2_all
+    cp chr_file_lens.hg19 chr_file_lens
+endif
+if ( $chrom_answer == 2) then
+    set chrom_file = hg18_chrom.bed
+    cp sites2_all.hg18 sites2_all
+    cp chr_file_lens.hg18 chr_file_lens
+endif
+if ( $chrom_answer == 3) then
+    echo "Enter Chromosome coordinate file:"
+    set chrom_file = $<
+    cat $chrom_file | | perl -ne '@_=split;open($out,">>","sites2_all");$count=0;for($i=50;$i<=$_[1];$i=$i+100){$count=$count+1;print $out join("\t",$_[0],$i)."\n";} print $count."\n";' > chr_file_lens
+endif
+
+echo "Generating test-set..."
+
+echo "Name of file with histone modification bed files for prediction:"
+echo $1
+set histone_test_file = $1
+
+echo "Generate RPKM files for the histone data from scratch? 1.Yes 2.No (use training data RPKM files)"
+echo $2
+set genrpkm = $2
+
+gcc -lm get_counts_bin_avg.c -o get_counts_bin_avg
+gcc -lm get_rpkm_sites.c -o get_rpkm_sites
+
+if ( $genrpkm == "Yes") then
+    echo "Generating RPKM files for prediction..."
+    set prefix = test_cell
+    ./get_counts_bin_avg $histone_test_file $chrom_file 100 $prefix
+else
+    echo "Using the existing RPKM files of training data..."
+    set prefix = train_cell
+endif
+
+set num_mods = 0
+if ( -e all_mods_rpkm ) then
+    rm all_mods_rpkm
+endif
+foreach y(`ls $prefix.*.rpkm`)
+    ./get_rpkm_sites 50 1 sites2_all $y $chrom_file temp1
+    if ( $num_mods == 0 ) then
+        cat temp1.list > all_mods_rpkm
+    else
+        paste all_mods_rpkm temp1.list > temp2
+        mv temp2 all_mods_rpkm
+    endif
+    @ num_mods = $num_mods + 1
+    echo $y
+end
+
+if ( -d test_set ) then
+    rm -rf test_set
+endif
+mkdir test_set
+perl partition_chr.pl $chrom_file all_mods_rpkm test_set
+
+echo "Done generating test-set. Ready to make predictions now"
+
+if ( -e forest_p300_tssbg.mat ) then
+    rm forest_p300_tssbg.mat
+endif
+cp $3 ./forest_p300_tssbg.mat
+
+echo " predicting enhancers now..."
+set ntrees = 65
+sed s/nvar/$num_mods/g predict.m| sed s/ntrees/$ntrees/g > predict_temp.m
+matlab -nodisplay -nosplash -nodesktop -r predict_temp
+
+cat `ls -1v test_set/*_enhancers.txt` > $4
+cat `ls -1v test_set/*_enhancers_allbins.txt` > $5
+
+echo " DONE! "

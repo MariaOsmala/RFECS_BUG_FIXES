@@ -1,0 +1,72 @@
+#!/bin/tcsh -e
+
+
+
+set chrom_answer = 1
+if ( $chrom_answer == 1) then
+    set chrom_file = hg19_chrom.bed
+    cp sites2_all.hg19 sites2_all
+    cp chr_file_lens.hg19 chr_file_lens
+endif
+
+
+echo "Generating test-set..."
+
+echo "Name of file with histone modification bed files for prediction:"
+
+set histone_test_file = "histone_K562_files_new.txt"
+
+echo "Generate RPKM files for the histone data from scratch? 1.Yes 2.No (use training data RPKM files)"
+
+set genrpkm = "Yes"
+
+gcc -lm get_counts_bin_avg.c -o get_counts_bin_avg
+gcc -lm get_rpkm_sites.c -o get_rpkm_sites
+
+if ( $genrpkm == "Yes") then
+    echo "Generating RPKM files for prediction..."
+    set prefix = test_cell
+    ./get_counts_bin_avg $histone_test_file $chrom_file 100 $prefix
+else
+    echo "Using the existing RPKM files of training data..."
+    set prefix = train_cell
+endif
+
+set num_mods = 0
+if ( -e all_mods_rpkm ) then
+    rm all_mods_rpkm
+endif
+foreach y(`ls $prefix.*.rpkm`)
+    ./get_rpkm_sites 50 1 sites2_all $y $chrom_file temp1
+    if ( $num_mods == 0 ) then
+        cat temp1.list > all_mods_rpkm
+    else
+        paste all_mods_rpkm temp1.list > temp2
+        mv temp2 all_mods_rpkm
+    endif
+    @ num_mods = $num_mods + 1
+    echo $y
+end
+
+if ( -d test_set ) then
+    rm -rf test_set
+endif
+mkdir test_set
+perl partition_chr.pl $chrom_file all_mods_rpkm test_set
+
+echo "Done generating test-set. Ready to make predictions now"
+
+if ( -e forest_p300_tssbg.mat ) then
+    rm forest_p300_tssbg.mat
+endif
+cp trained_forests/K562_p300DNase_enhancers_promotersDNase_combinedWith_random_with_signal.mat ./forest_p300_tssbg.mat
+
+echo " predicting enhancers now..."
+set ntrees = 65
+sed s/nvar/$num_mods/g predict.m| sed s/ntrees/$ntrees/g > predict_temp.m
+matlab -nodisplay -nosplash -nodesktop -r predict_temp
+
+cat `ls -1v test_set/*_enhancers.txt` > results/K562_p300DNase_enhancers_promotersDNase_combinedWith_random_with_signal.txt
+cat `ls -1v test_set/*_enhancers_allbins.txt` > results/K562_p300DNase_enhancers_promotersDNase_combinedWith_random_with_signal_allbins.txt
+
+echo " DONE! "

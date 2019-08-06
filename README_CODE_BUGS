@@ -1,0 +1,32 @@
+* Implicit assignment to @_. All occurances of split is replaced by @_=split
+(This might cause a problem in recent Perl versions)
+
+* get_rpkm_sites:198-199 replaced:
+         fscanf(fh,"%d", &tmpChrom2);tmpIndex=**tmpChrom2-1;
+         binVals[tmpIndex][tmpPos/BIN_**SIZE]=tmpVal;
+
+* train_and_predict (line 100) requires p300_all_sites file to have 3 columns
+and column 2 and 3 must be start end columns, respectively. If this is not
+satisfied, then background data consists of active TSS sites only.
+
+* I modified forest_predict_par.m file to fix this issue. Here is the
+existing code:
+
+ 33         file=strcat(output_path,chr_set(x),extn);
+ 34         save(char(file),'mean_bg_all');
+ 35         [s sind]=sort(index_map);
+ 36         mean_bg_all=mean_bg_all(sind);
+
+It seems that after saving the mat file, some sort of sorting is going
+on. However, if I do this sorting before save():
+
+ 33         file=strcat(output_path,chr_set(x),extn);
+ 34         [s sind]=sort(index_map);
+ 35         mean_bg_all=mean_bg_all(sind);
+ 36         save(char(file),'mean_bg_all');
+
+then, the matching between .mat file and .txt file seems much better.
+
+* get_counts_bin_avg expects that: 5th column (not 6th) of histone modification marks must be the strand
+
+# Gokcen

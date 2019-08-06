@@ -1,0 +1,39 @@
+#!/bin/tcsh
+
+set chrom_file = hg19_chrom.bed
+echo $chrom_file
+echo "Generating test-set..."
+cat hg19_chrom.bed | perl -ne 'split;for($i=50;$i<=$_[1];$i=$i+100){print join("\t",$_[0],$i,"+")."\n";}' > test_set/sites2_all 
+set prefix = train_cell
+
+echo "Same cell-type as training? 1.Yes 2.No"
+set answer = $<
+echo $answer
+
+
+if ($answer == 2) then
+echo "Name of file with histone modification bed files for prediction:"
+set histone_test_file = $<
+echo "Generating RPKM files for prediction..."
+gcc -lm get_counts_bin_avg.c -o get_counts_bin_avg
+./get_counts_bin_avg $histone_test_file $chrom_file 100 test_cell
+set prefix = test_cell
+endif
+
+set num_mods = 0
+foreach y(`ls $prefix.*.rpkm`)
+./get_rpkm_sites 50 1 test_set/sites2_all $y $chrom_file temp1
+if ( $num_mods == 0 ) then
+cat temp1.list > test_set/all_mods_rpkm
+else
+paste test_set/all_mods_rpkm temp1.list > temp2
+mv temp2 test_set/all_mods_rpkm
+endif
+@ num_mods = $num_mods + 1
+echo $y
+end
+
+perl partition.pl $chrom_file
+
+
+
